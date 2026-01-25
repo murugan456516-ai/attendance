@@ -13,7 +13,7 @@ const App = () => {
     { id: 7, name: "Prof. Guna", subject: "OS" },
   ];
 
-  // --- 2. DATA GENERATOR (With isLocked Property) ---
+  // --- 2. DATA GENERATOR (Realistic Slots) ---
   const generateWeekData = (fixedSubject) => {
     const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
     const times = [
@@ -25,21 +25,21 @@ const App = () => {
       id: `day-${dayIndex}`,
       name: day,
       periods: times.map((time, timeIndex) => {
+        // LOGIC: Only assign class if this condition is met (e.g., specific pattern)
+        // This ensures they don't teach all 7 hours.
+        // (dayIndex + timeIndex) % 3 === 0 is just a math trick to scatter classes
         const isTeachingSlot = (dayIndex + timeIndex) % 3 === 0;
 
         if (isTeachingSlot) {
           return {
             id: `p-${dayIndex}-${timeIndex}`,
             time: time,
-            subject: fixedSubject,
+            subject: fixedSubject, // The Professor's Subject
             type: "CLASS",
-            isLocked: false, // <--- NEW: Default is Unlocked
             students: [
               { id: 1, name: "Student A", roll: "101", status: "Present" },
               { id: 2, name: "Student B", roll: "102", status: "Absent" },
               { id: 3, name: "Student C", roll: "103", status: "Present" },
-              { id: 4, name: "Student D", roll: "104", status: "Present" },
-              { id: 5, name: "Student E", roll: "105", status: "Absent" },
             ]
           };
         } else {
@@ -48,8 +48,7 @@ const App = () => {
             time: time,
             subject: "Free Period",
             type: "FREE",
-            isLocked: false, 
-            students: []
+            students: [] // No students in free period
           };
         }
       })
@@ -75,21 +74,14 @@ const App = () => {
   const activeDay = activeFaculty?.schedule.find(d => d.id === selectedDayId);
   const activePeriod = activeDay?.periods.find(p => p.id === selectedPeriodId);
 
-  // --- 5. TOGGLE ATTENDANCE (With Lock Check) ---
+  // --- 5. ATTENDANCE TOGGLE ---
   const toggleAttendance = (studentId) => {
-    // GUARD CLAUSE: If locked, stop here.
-    if (activePeriod.isLocked) {
-      alert("This class is locked! You cannot modify attendance.");
-      return;
-    }
-
     const newData = data.map(faculty => {
       if (faculty.id !== selectedFacultyId) return faculty;
       const newSchedule = faculty.schedule.map(day => {
         if (day.id !== selectedDayId) return day;
         const newPeriods = day.periods.map(period => {
           if (period.id !== selectedPeriodId) return period;
-          
           const newStudents = period.students.map(student => {
             if (student.id !== studentId) return student;
             return { ...student, status: student.status === "Present" ? "Absent" : "Present" };
@@ -102,25 +94,6 @@ const App = () => {
     });
     setData(newData);
   };
-
-  // --- 6. NEW: TOGGLE LOCK FUNCTION ---
-  const toggleLock = () => {
-    const newData = data.map(faculty => {
-      if (faculty.id !== selectedFacultyId) return faculty;
-      const newSchedule = faculty.schedule.map(day => {
-        if (day.id !== selectedDayId) return day;
-        const newPeriods = day.periods.map(period => {
-          if (period.id !== selectedPeriodId) return period;
-          // FLIP THE LOCK STATE
-          return { ...period, isLocked: !period.isLocked };
-        });
-        return { ...day, periods: newPeriods };
-      });
-      return { ...faculty, schedule: newSchedule };
-    });
-    setData(newData);
-  };
-
 
   // --- VIEWS ---
 
@@ -149,6 +122,7 @@ const App = () => {
         <h1>{activeFaculty.name}</h1>
         <div className="list-group">
           {activeFaculty.schedule.map(day => {
+            // Count how many actual classes they have this day
             const classCount = day.periods.filter(p => p.type === "CLASS").length;
             return (
               <div key={day.id} className="list-item" onClick={() => setSelectedDayId(day.id)}>
@@ -162,7 +136,7 @@ const App = () => {
     );
   }
 
-  // VIEW 3: PERIODS
+  // VIEW 3: PERIODS (With Free Periods Disabled)
   if (!selectedPeriodId) {
     return (
       <div className="container">
@@ -172,16 +146,13 @@ const App = () => {
           {activeDay.periods.map((period, index) => (
             <div 
               key={period.id} 
+              // Add 'disabled' class if it is a Free Period
               className={`card period-card ${period.type === "FREE" ? "disabled" : ""}`} 
               onClick={() => period.type === "CLASS" && setSelectedPeriodId(period.id)}
             >
               <div className="period-badge">Period {index + 1}</div>
-              <div className="period-info">
-                <h3>{period.subject}</h3>
-                <p>{period.time}</p>
-              </div>
-              {/* Show Lock Icon if locked */}
-              {period.isLocked && <span className="lock-icon">🔒</span>}
+              <h3>{period.subject}</h3>
+              <p>{period.time}</p>
             </div>
           ))}
         </div>
@@ -189,35 +160,17 @@ const App = () => {
     );
   }
 
-  // VIEW 4: ATTENDANCE (Updated with Lock Button)
+  // VIEW 4: ATTENDANCE
   return (
     <div className="container">
-      <div className="top-nav">
-        <button className="back-btn" onClick={() => setSelectedPeriodId(null)}>← Back</button>
-        
-        {/* LOCK BUTTON */}
-        <button 
-          className={`lock-btn ${activePeriod.isLocked ? "locked" : "unlocked"}`} 
-          onClick={toggleLock}
-        >
-          {activePeriod.isLocked ? "🔒 Unlock Attendance" : "🔓 Lock Attendance"}
-        </button>
-      </div>
-
-      <div className={`header-box ${activePeriod.isLocked ? "locked-mode" : ""}`}>
+      <button className="back-btn" onClick={() => setSelectedPeriodId(null)}>← Back</button>
+      <div className="header-box">
         <h2>{activePeriod.subject}</h2>
         <p>{activeDay.name} | {activePeriod.time}</p>
-        {activePeriod.isLocked && <div className="lock-banner">READ ONLY MODE</div>}
       </div>
-
       <div className="student-list">
         {activePeriod.students.map(student => (
-          <div 
-            key={student.id} 
-            // Add 'read-only' class if locked
-            className={`student-row ${student.status.toLowerCase()} ${activePeriod.isLocked ? "read-only" : ""}`} 
-            onClick={() => toggleAttendance(student.id)}
-          >
+          <div key={student.id} className={`student-row ${student.status.toLowerCase()}`} onClick={() => toggleAttendance(student.id)}>
             <div className="info"><b>{student.roll}</b> <span>{student.name}</span></div>
             <span className={`status-badge ${student.status.toLowerCase()}`}>{student.status}</span>
           </div>

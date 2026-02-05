@@ -1,8 +1,70 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import "./App.css";
 
+// --- COMPONENT IMPORTS ---
+import LandingPage from "./LandingPage";
+import Auth from "./Auth";
+import Navbar from "./Navbar";
+import DashboardHome from "./DashboardHome"; 
+import FacultyList from "./FacultyList";
+import Timetable from "./Timetable";
+import AttendanceSheet from "./AttendanceSheet";
+import ReportsDashboard from "./ReportsDashboard";
+import SettingsPanel from "./SettingsPanel";
+
 const App = () => {
-  // --- 1. CONFIGURATION ---
+  // --- 1. AUTH & USER STATE ---
+  const [user, setUser] = useState(null);
+  const [isGuest, setIsGuest] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+
+  // --- 2. HISTORY ENGINE (For Browser Navigation) ---
+  // Default State: Sitting at "Home"
+  const [history, setHistory] = useState([
+    { view: "home", facId: null, dayId: null, perId: null }
+  ]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
+  // Current View Snapshot
+  const currentState = history[historyIndex];
+
+  // --- 3. AUTH EFFECTS ---
+  useEffect(() => {
+    const savedUser = localStorage.getItem("uni_user");
+    if (savedUser) setUser(JSON.parse(savedUser));
+  }, []);
+
+  const handleLogin = (userData) => {
+    setUser(userData);
+    localStorage.setItem("uni_user", JSON.stringify(userData));
+    setShowAuth(false);
+    setIsGuest(false);
+  };
+
+  const handleLogout = () => {
+    setUser(null);
+    setIsGuest(false);
+    setShowAuth(false);
+    localStorage.removeItem("uni_user");
+    // Reset History on Logout
+    setHistory([{ view: "home", facId: null, dayId: null, perId: null }]);
+    setHistoryIndex(0);
+  };
+
+  // --- 4. THEME ---
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem("theme") === "dark");
+  useEffect(() => {
+    if (darkMode) {
+      document.body.classList.add("dark-mode");
+      localStorage.setItem("theme", "dark");
+    } else {
+      document.body.classList.remove("dark-mode");
+      localStorage.setItem("theme", "light");
+    }
+  }, [darkMode]);
+  const toggleTheme = () => setDarkMode(!darkMode);
+
+  // --- 5. DATA GENERATION ---
   const facultyConfig = [
     { id: 1, name: "Prof. Arun", subject: "React JS" },
     { id: 2, name: "Prof. Ben", subject: "Node JS" },
@@ -13,49 +75,36 @@ const App = () => {
     { id: 7, name: "Prof. Guna", subject: "OS" },
   ];
 
-  // --- 2. DATA GENERATOR (Realistic Slots) ---
   const generateWeekData = (fixedSubject) => {
     const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-    const times = [
-      "09:00 - 10:00", "10:00 - 11:00", "11:00 - 12:00", "12:00 - 01:00",
-      "02:00 - 03:00", "03:00 - 04:00", "04:00 - 05:00"
-    ];
-
+    const times = ["09:00 - 10:00", "10:00 - 11:00", "11:00 - 12:00", "12:00 - 01:00", "02:00 - 03:00", "03:00 - 04:00", "04:00 - 05:00"];
+    
     return days.map((day, dayIndex) => ({
       id: `day-${dayIndex}`,
       name: day,
       periods: times.map((time, timeIndex) => {
-        // LOGIC: Only assign class if this condition is met (e.g., specific pattern)
-        // This ensures they don't teach all 7 hours.
-        // (dayIndex + timeIndex) % 3 === 0 is just a math trick to scatter classes
         const isTeachingSlot = (dayIndex + timeIndex) % 3 === 0;
-
         if (isTeachingSlot) {
           return {
             id: `p-${dayIndex}-${timeIndex}`,
             time: time,
-            subject: fixedSubject, // The Professor's Subject
+            subject: fixedSubject,
             type: "CLASS",
-            students: [
-              { id: 1, name: "Student A", roll: "101", status: "Present" },
-              { id: 2, name: "Student B", roll: "102", status: "Absent" },
-              { id: 3, name: "Student C", roll: "103", status: "Present" },
-            ]
+            isLocked: false,
+            students: Array.from({ length: 30 }, (_, i) => ({
+              id: i + 1,
+              name: `Student ${i + 1}`,
+              roll: (100 + i + 1).toString(),
+              status: "Present"
+            }))
           };
         } else {
-          return {
-            id: `p-${dayIndex}-${timeIndex}`,
-            time: time,
-            subject: "Free Period",
-            type: "FREE",
-            students: [] // No students in free period
-          };
+          return { id: `p-${dayIndex}-${timeIndex}`, time: time, subject: "Free Period", type: "FREE", isLocked: false, students: [] };
         }
       })
     }));
   };
 
-  // --- 3. STATE ---
   const [data, setData] = useState(
     facultyConfig.map((fac) => ({
       id: fac.id,
@@ -65,27 +114,61 @@ const App = () => {
     }))
   );
 
-  const [selectedFacultyId, setSelectedFacultyId] = useState(null);
-  const [selectedDayId, setSelectedDayId] = useState(null);
-  const [selectedPeriodId, setSelectedPeriodId] = useState(null);
+  // --- 6. NAVIGATION ACTIONS (HISTORY AWARE) ---
 
-  // --- 4. HELPERS ---
-  const activeFaculty = data.find(f => f.id === selectedFacultyId);
-  const activeDay = activeFaculty?.schedule.find(d => d.id === selectedDayId);
-  const activePeriod = activeDay?.periods.find(p => p.id === selectedPeriodId);
+  // Generic Navigate: Pushes new state to history stack
+  const navigateTo = (newSnapshot) => {
+    // If we are in middle of stack (clicked back 3 times), clicking a link
+    // truncates the "future" history (just like Chrome/Edge)
+    const newHistory = history.slice(0, historyIndex + 1);
+    newHistory.push(newSnapshot);
+    setHistory(newHistory);
+    setHistoryIndex(newHistory.length - 1);
+  };
 
-  // --- 5. ATTENDANCE TOGGLE ---
-  const toggleAttendance = (studentId) => {
+  // Specific Actions
+  const goToHome = () => navigateTo({ view: "home", facId: null, dayId: null, perId: null });
+  const goToFaculty = () => navigateTo({ view: "faculty", facId: null, dayId: null, perId: null });
+  const goToSettings = () => navigateTo({ view: "settings", facId: null, dayId: null, perId: null });
+  const goToReports = () => navigateTo({ view: "reports", facId: null, dayId: null, perId: null });
+  
+  // Drill-down Actions
+  const selectFaculty = (id) => navigateTo({ view: "dashboard", facId: id, dayId: null, perId: null });
+  const selectDay = (dId) => navigateTo({ ...currentState, dayId: dId, perId: null });
+  const selectPeriod = (pId) => navigateTo({ ...currentState, perId: pId });
+
+  // Browser Controls
+  const handleBack = () => {
+    if (historyIndex > 0) setHistoryIndex(historyIndex - 1);
+  };
+
+  const handleForward = () => {
+    if (historyIndex < history.length - 1) setHistoryIndex(historyIndex + 1);
+  };
+
+  // Auth Wrapper for Actions
+  const withAuth = (action) => {
+    if (user) action();
+    else setShowAuth(true);
+  };
+
+  // --- 7. DATA HELPERS ---
+  const activeFaculty = data.find(f => f.id === currentState.facId);
+  const activeDay = activeFaculty?.schedule.find(d => d.id === currentState.dayId);
+  const activePeriod = activeDay?.periods.find(p => p.id === currentState.perId);
+
+  // --- 8. UPDATE LOGIC (Locking, Attendance) ---
+  const updateData = (studentCallback, isLockAction = false) => {
     const newData = data.map(faculty => {
-      if (faculty.id !== selectedFacultyId) return faculty;
+      if (faculty.id !== currentState.facId) return faculty;
       const newSchedule = faculty.schedule.map(day => {
-        if (day.id !== selectedDayId) return day;
+        if (day.id !== currentState.dayId) return day;
         const newPeriods = day.periods.map(period => {
-          if (period.id !== selectedPeriodId) return period;
-          const newStudents = period.students.map(student => {
-            if (student.id !== studentId) return student;
-            return { ...student, status: student.status === "Present" ? "Absent" : "Present" };
-          });
+          if (period.id !== currentState.perId) return period;
+          
+          if (isLockAction) return { ...period, isLocked: !period.isLocked };
+
+          const newStudents = period.students.map(studentCallback);
           return { ...period, students: newStudents };
         });
         return { ...day, periods: newPeriods };
@@ -95,89 +178,126 @@ const App = () => {
     setData(newData);
   };
 
-  // --- VIEWS ---
+  const toggleAttendance = (studentId) => {
+    if (activePeriod.isLocked) return alert("Class Locked!");
+    updateData((student) => {
+      if (student.id !== studentId) return student;
+      return { ...student, status: student.status === "Present" ? "Absent" : "Present" };
+    });
+  };
 
-  // VIEW 1: FACULTY
-  if (!selectedFacultyId) {
+  const toggleLock = () => { updateData(null, true); };
+
+  // --- 9. RENDER LOGIC ---
+
+  // A. SHOW LOGIN SCREEN
+  if (showAuth) {
+    return <Auth onLogin={handleLogin} />;
+  }
+
+  // B. SHOW MAIN APP
+  if (user || isGuest) {
+    
+    const renderContent = () => {
+      const { view, perId, facId, dayId } = currentState;
+
+      // 1. Settings (Accessible to all)
+      if (view === "settings") {
+        return (
+          <SettingsPanel 
+            darkMode={darkMode} 
+            toggleTheme={toggleTheme} 
+            user={user} 
+            onLogout={handleLogout} 
+            onLoginClick={() => setShowAuth(true)} 
+          />
+        );
+      }
+
+      // 2. Reports (Protected)
+      if (view === "reports") return <ReportsDashboard data={data} />;
+      
+      // 3. Attendance Sheet (Deepest Level)
+      if (perId) {
+        return (
+          <AttendanceSheet 
+            periodData={activePeriod} 
+            dayName={activeDay.name} 
+            onToggleAttendance={toggleAttendance} 
+            onToggleLock={toggleLock} 
+            onBack={handleBack} 
+          />
+        );
+      }
+
+      // 4. Timetable (Level 2)
+      if (facId) {
+        return (
+          <Timetable 
+            facultyName={activeFaculty.name} 
+            schedule={activeFaculty.schedule} 
+            selectedDayId={dayId} 
+            onSelectDay={selectDay} 
+            onSelectPeriod={selectPeriod} 
+            onBack={handleBack} 
+          />
+        );
+      }
+
+      // 5. Faculty List (Level 1) - Only if explicitly requested
+      if (view === "faculty") {
+        return <FacultyList data={data} onSelect={(id) => withAuth(() => selectFaculty(id))} />;
+      }
+
+      // 6. DEFAULT: Dashboard Home
+      return (
+        <DashboardHome 
+          user={user} 
+          onNavigate={(v) => { 
+            if(v==="faculty") withAuth(goToFaculty);
+            else if(v==="reports") withAuth(goToReports);
+            else if(v==="settings") goToSettings();
+          }} 
+          onLoginRequest={() => setShowAuth(true)} 
+        />
+      );
+    };
+
     return (
-      <div className="container">
-        <h1>Select Faculty</h1>
-        <div className="grid-2">
-          {data.map(f => (
-            <div key={f.id} className="card faculty-card" onClick={() => setSelectedFacultyId(f.id)}>
-              <h3>{f.name}</h3>
-              <p className="subject-tag">{f.assignedSubject}</p>
-            </div>
-          ))}
-        </div>
+      <div className="app-layout">
+        <Navbar 
+          currentView={currentState.view} 
+          
+          // Navigation Callbacks
+          onNavClick={(v) => {
+            if(v==="home") goToHome();
+            else if(v==="settings") goToSettings();
+            else if(v==="reports") withAuth(goToReports);
+            else if(v==="faculty") withAuth(goToFaculty);
+          }} 
+          
+          // Data & User Callbacks
+          facultyData={data} 
+          onSelectFaculty={(id) => withAuth(() => selectFaculty(id))} 
+          user={user} 
+          onLoginClick={() => setShowAuth(true)}
+          
+          // History / Browser Control Props
+          canGoBack={historyIndex > 0}
+          canGoForward={historyIndex < history.length - 1}
+          onBack={handleBack}
+          onForward={handleForward}
+        /> 
+        
+        <main className="main-content">
+          {renderContent()}
+        </main>
       </div>
     );
   }
 
-  // VIEW 2: DAY
-  if (!selectedDayId) {
-    return (
-      <div className="container">
-        <button className="back-btn" onClick={() => setSelectedFacultyId(null)}>← Back</button>
-        <h1>{activeFaculty.name}</h1>
-        <div className="list-group">
-          {activeFaculty.schedule.map(day => {
-            // Count how many actual classes they have this day
-            const classCount = day.periods.filter(p => p.type === "CLASS").length;
-            return (
-              <div key={day.id} className="list-item" onClick={() => setSelectedDayId(day.id)}>
-                <span>📅 {day.name}</span>
-                <span className="count-badge">{classCount} Classes</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  // VIEW 3: PERIODS (With Free Periods Disabled)
-  if (!selectedPeriodId) {
-    return (
-      <div className="container">
-        <button className="back-btn" onClick={() => setSelectedDayId(null)}>← Back</button>
-        <h1>{activeDay.name}</h1>
-        <div className="timetable-grid">
-          {activeDay.periods.map((period, index) => (
-            <div 
-              key={period.id} 
-              // Add 'disabled' class if it is a Free Period
-              className={`card period-card ${period.type === "FREE" ? "disabled" : ""}`} 
-              onClick={() => period.type === "CLASS" && setSelectedPeriodId(period.id)}
-            >
-              <div className="period-badge">Period {index + 1}</div>
-              <h3>{period.subject}</h3>
-              <p>{period.time}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // VIEW 4: ATTENDANCE
-  return (
-    <div className="container">
-      <button className="back-btn" onClick={() => setSelectedPeriodId(null)}>← Back</button>
-      <div className="header-box">
-        <h2>{activePeriod.subject}</h2>
-        <p>{activeDay.name} | {activePeriod.time}</p>
-      </div>
-      <div className="student-list">
-        {activePeriod.students.map(student => (
-          <div key={student.id} className={`student-row ${student.status.toLowerCase()}`} onClick={() => toggleAttendance(student.id)}>
-            <div className="info"><b>{student.roll}</b> <span>{student.name}</span></div>
-            <span className={`status-badge ${student.status.toLowerCase()}`}>{student.status}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  // C. DEFAULT: LANDING PAGE
+  return <LandingPage onGetStarted={() => setIsGuest(true)} />;
 };
 
 export default App;
